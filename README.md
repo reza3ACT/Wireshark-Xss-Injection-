@@ -13,18 +13,18 @@ langkah-Langkah Cek di wireshark :
 								  Retransmission/Out-of-Order/Duplicate ACK.						 
 
 
-1	0.000000	192.168.1.50	198.51.100.20	TCP	54	51000 → 80 [SYN] Seq=0 Win=8192 Len=0
+1	0.000000	192.168.1.50	198.51.100.20	TCP	54	51000 → 80 [SYN] Seq=0 Win=8192 Len=0.
 		Artinya	: Host 192.168.1.50 memulai koneksi TCP ke port 80 pada server 198.51.100.20. Flag = SYN (synchronise) berarti awal handshake.
-		
 
-2	1.000000	198.51.100.20	192.168.1.50	TCP	54	80 → 51000 [SYN, ACK] Seq=0 Ack=1 Win=8192 Len=0
+2	1.000000	198.51.100.20	192.168.1.50	TCP	54	80 → 51000 [SYN, ACK] Seq=0 Ack=1 Win=8192 Len=0.
+
 		Artinya	: Server menjawab SYN+ACK — part kedua dari 3-way handshake. Ack=1 berarti mengakui SYN (seq+1).
 
-3	2.000000	192.168.1.50	198.51.100.20	TCP	54	51000 → 80 [ACK] Seq=1 Ack=1 Win=8192 Len=0	
+3	2.000000	192.168.1.50	198.51.100.20	TCP	54	51000 → 80 [ACK] Seq=1 Ack=1 Win=8192 Len=0.
 		Artinya	: Client menyelesaikan handshake dengan ACK. Sekarang koneksi terbuka,
 			  Selanjutnya HTTP akan lewat koneksi ini (socket 192.168.1.50:51000 ↔ 198.51.100.20:80).
 
-4	3.000000	192.168.1.50	198.51.100.20	HTTP	132	GET /malicious.hta HTTP/1.1 
+4	3.000000	192.168.1.50	198.51.100.20	HTTP	132	GET /malicious.hta HTTP/1.1 .
 		Artinya	: HTTP request GET. Panjang 132 bytes (ini ukuran frame pada capture).
 			      Biasanya berisi header: GET /malicious.hta HTTP/1.1, Host: ..., User-Agent, Accept, dll.
 
@@ -93,7 +93,7 @@ langkah-Langkah Cek di wireshark :
 				HTTP/1.1 200 OK
 				Content-Length: 2
 
-16	15.000000	192.168.1.50	198.51.100.30	HTTP	197	[TCP Out-Of-Order] POST /c2 HTTP/1.1  (application/x-www-form-urlencoded)				
+16	15.000000	192.168.1.50	198.51.100.30	HTTP	197	[TCP Out-Of-Order] POST /c2 HTTP/1.1  (application/x-www-form-urlencoded).
 		Artiya	: 
 			1. TCP Out-Of-Order di Wireshark berarti Wireshark menerima paket dengan sequence number yang
 			     tidak cocok dengan yang diharapkannya sekarang — contoh: Wireshark sudah menerima paket
